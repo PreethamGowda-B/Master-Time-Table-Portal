@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}Add Subject - EWC Timetable{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h4 class="mb-1"><i class="bi bi-book"></i> Add Subject</h4>
+    <p class="text-muted mb-0">Add subjects for departments and semesters</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-plus-circle"></i> New Subject</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    {% for field in form %}
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="text-danger small">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-save"></i> Save Subject
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-list-ul"></i> All Subjects</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Code</th><th>Name</th><th>Department</th>
+                                <th>Semester</th><th>Credits</th><th>Type</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for subject in subjects %}
+                            <tr>
+                                <td><span class="badge" style="background:#1a237e;">{{ subject.code }}</span></td>
+                                <td>{{ subject.name }}</td>
+                                <td>{{ subject.department.name }}</td>
+                                <td>Sem {{ subject.semester }}</td>
+                                <td>{{ subject.credits }}</td>
+                                <td>
+                                    {% if subject.is_lab %}
+                                        <span class="badge bg-warning text-dark">Lab</span>
+                                    {% else %}
+                                        <span class="badge bg-success">Theory</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="text-center text-muted py-4">No subjects added yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

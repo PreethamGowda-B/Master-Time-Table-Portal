@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard - EWC Timetable{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h4 class="mb-1"><i class="bi bi-speedometer2"></i> Dashboard</h4>
+    <p class="text-muted mb-0">Welcome back, {{ user.get_full_name|default:user.username }} &mdash; Role: <strong>{{ role|title }}</strong></p>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2.5rem; color:#1a237e;"><i class="bi bi-building"></i></div>
+            <h2 class="fw-bold" style="color:#1a237e;">{{ departments }}</h2>
+            <p class="text-muted mb-0">Departments</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2.5rem; color:#2e7d32;"><i class="bi bi-book"></i></div>
+            <h2 class="fw-bold" style="color:#2e7d32;">{{ subjects }}</h2>
+            <p class="text-muted mb-0">Subjects</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2.5rem; color:#e65100;"><i class="bi bi-people"></i></div>
+            <h2 class="fw-bold" style="color:#e65100;">{{ faculties }}</h2>
+            <p class="text-muted mb-0">Faculty Members</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center p-3">
+            <div style="font-size:2.5rem; color:#6a1b9a;"><i class="bi bi-calendar-check"></i></div>
+            <h2 class="fw-bold" style="color:#6a1b9a;">{{ timetables }}</h2>
+            <p class="text-muted mb-0">Active Timetables</p>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    {% if role == 'admin' or role == 'hod' %}
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-book"></i> Manage Subjects</div>
+            <div class="card-body">
+                <p class="text-muted">Add or manage subjects for each department and semester.</p>
+                <a href="{% url 'add_subject' %}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Subject</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-person-check"></i> Faculty Availability</div>
+            <div class="card-body">
+                <p class="text-muted">Set faculty availability slots for timetable generation.</p>
+                <a href="{% url 'add_faculty_availability' %}" class="btn btn-primary"><i class="bi bi-clock"></i> Set Availability</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-magic"></i> Generate Timetable</div>
+            <div class="card-body">
+                <p class="text-muted">Auto-generate timetable based on subjects and faculty availability.</p>
+                <a href="{% url 'generate_timetable' %}" class="btn btn-success"><i class="bi bi-lightning"></i> Generate Now</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-building"></i> Department Timetable</div>
+            <div class="card-body">
+                <p class="text-muted">View timetable by department and semester.</p>
+                <a href="{% url 'department_view' dept_id=1 %}" class="btn btn-outline-primary"><i class="bi bi-eye"></i> View</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-person-lines-fill"></i> Faculty Timetable</div>
+            <div class="card-body">
+                <p class="text-muted">View individual faculty timetable and download PDF.</p>
+                <a href="{% url 'faculty_timetable' %}" class="btn btn-outline-primary"><i class="bi bi-eye"></i> View</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

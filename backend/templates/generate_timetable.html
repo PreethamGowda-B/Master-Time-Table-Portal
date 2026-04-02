@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}Generate Timetable - EWC{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h4 class="mb-1"><i class="bi bi-magic"></i> Generate Timetable</h4>
+    <p class="text-muted mb-0">Auto-generate timetable based on subjects, faculty availability, and classrooms</p>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-lightning"></i> Timetable Generator</div>
+            <div class="card-body p-4">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    Make sure you have added subjects, faculty availability, and classrooms before generating.
+                </div>
+                <form method="post" id="genForm">
+                    {% csrf_token %}
+                    {% for field in form %}
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="text-danger small">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-success w-100 py-2 fw-semibold" id="genBtn">
+                        <i class="bi bi-lightning-charge"></i> Generate Timetable
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header"><i class="bi bi-info-circle"></i> How It Works</div>
+            <div class="card-body">
+                <ol class="mb-0">
+                    <li>Fetches all subjects for the selected department &amp; semester</li>
+                    <li>Checks faculty availability for each time slot</li>
+                    <li>Assigns available classrooms avoiding conflicts</li>
+                    <li>Generates a conflict-free timetable automatically</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+document.getElementById('genForm').addEventListener('submit', function() {
+    const btn = document.getElementById('genBtn');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
+    btn.disabled = true;
+});
+</script>
+{% endblock %}

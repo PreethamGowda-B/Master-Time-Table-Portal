@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% load dict_filters %}
+{% block title %}Faculty Availability - EWC Timetable{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h4 class="mb-1"><i class="bi bi-person-check"></i> Faculty Availability</h4>
+    <p class="text-muted mb-0">Mark available time slots for each faculty member</p>
+</div>
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-clock"></i> Set Availability Slots</div>
+    <div class="card-body">
+        <form method="post" id="availForm">
+            {% csrf_token %}
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Select Faculty</label>
+                    <select name="faculty" class="form-select" id="facultySelect" required>
+                        <option value="">-- Select Faculty --</option>
+                        {% for f in faculties %}
+                        <option value="{{ f.id }}">{{ f.user.get_full_name }} ({{ f.department.code }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end gap-2">
+                    <button type="button" class="btn btn-outline-success btn-sm" onclick="selectAll()">
+                        <i class="bi bi-check-all"></i> Select All
+                    </button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearAll()">
+                        <i class="bi bi-x-circle"></i> Clear All
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-bordered text-center">
+                    <thead>
+                        <tr>
+                            <th class="day-header">Day / Slot</th>
+                            {% for slot in slots_by_day.Monday %}
+                            <th class="slot-header">
+                                Slot {{ slot.slot_number }}<br>
+                                <small>{{ slot.start_time|time:"H:i" }}-{{ slot.end_time|time:"H:i" }}</small>
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for day in days %}
+                        <tr>
+                            <td class="fw-bold" style="background:#e8eaf6;">{{ day }}</td>
+                            {% for slot in slots_by_day|get_item:day %}
+                            <td>
+                                <div class="form-check d-flex justify-content-center">
+                                    <input class="form-check-input slot-check" type="checkbox"
+                                           name="slot_{{ slot.id }}" id="slot_{{ slot.id }}" checked>
+                                </div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary px-4">
+                    <i class="bi bi-save"></i> Save Availability
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+function selectAll() { document.querySelectorAll('.slot-check').forEach(c => c.checked = true); }
+function clearAll() { document.querySelectorAll('.slot-check').forEach(c => c.checked = false); }
+</script>
+{% endblock %}

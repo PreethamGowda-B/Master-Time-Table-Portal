@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% load dict_filters %}
+{% block title %}Faculty Timetable - EWC{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-person-lines-fill"></i> Faculty Timetable</h4>
+        <p class="text-muted mb-0">{% if faculty %}{{ faculty.user.get_full_name }} &mdash; {{ faculty.department.name }}{% else %}Select a faculty member{% endif %}</p>
+    </div>
+    {% if faculty %}
+    <a href="{% url 'download_faculty_pdf' faculty.id %}" class="btn btn-danger">
+        <i class="bi bi-file-earmark-pdf"></i> Download PDF
+    </a>
+    {% endif %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2">
+            {% for f in faculties %}
+            <div class="col-auto">
+                <a href="{% url 'faculty_timetable_detail' f.id %}"
+                   class="btn btn-sm {% if faculty and faculty.id == f.id %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+                    {{ f.user.get_full_name|default:f.user.username }}
+                    <span class="badge bg-light text-dark ms-1">{{ f.department.code }}</span>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{% if faculty and grid %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-table"></i> {{ faculty.user.get_full_name }} | {{ faculty.employee_id }}
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered mb-0" style="min-width:700px;">
+                <thead>
+                    <tr>
+                        <th class="day-header" style="width:90px;">Day</th>
+                        {% for slot in grid.Monday %}
+                        <th class="slot-header text-center">
+                            Slot {{ slot.slot_number }}<br>
+                            <small>{{ slot.start_time|time:"H:i" }}-{{ slot.end_time|time:"H:i" }}</small>
+                        </th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for day in days %}
+                    <tr>
+                        <td class="fw-bold text-center" style="background:#e8eaf6; vertical-align:middle;">{{ day }}</td>
+                        {% with day_slots=grid|get_item:day %}
+                        {% for slot, entry in day_slots.items %}
+                        <td class="timetable-cell text-center">
+                            {% if entry %}
+                            <div class="subject-code">{{ entry.subject.code }}</div>
+                            <div class="faculty-name">{{ entry.timetable.department.code }} Sem{{ entry.timetable.semester }}</div>
+                            <div class="room-name"><i class="bi bi-door-open"></i> {{ entry.classroom.name }}</div>
+                            {% else %}
+                            <span class="empty-cell">—</span>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                        {% endwith %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% elif faculty %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> No timetable entries found for this faculty member.
+</div>
+{% endif %}
+{% endblock %}

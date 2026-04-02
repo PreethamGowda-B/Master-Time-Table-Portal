@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% load dict_filters %}
+{% block title %}Department Timetable - EWC{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-building"></i> Department Timetable</h4>
+        <p class="text-muted mb-0">{{ department.name }} &mdash; Semester {{ semester }}</p>
+    </div>
+    {% if timetable %}
+    <a href="{% url 'download_pdf' timetable.id %}" class="btn btn-danger">
+        <i class="bi bi-file-earmark-pdf"></i> Download PDF
+    </a>
+    {% endif %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label mb-1 fw-semibold">Department</label>
+                <select name="dept" class="form-select form-select-sm" onchange="this.form.submit()">
+                    {% for dept in departments %}
+                    <option value="{{ dept.id }}" {% if dept.id == department.id %}selected{% endif %}>{{ dept.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1 fw-semibold">Semester</label>
+                <select name="semester" class="form-select form-select-sm" onchange="this.form.submit()">
+                    {% for s in semesters %}
+                    <option value="{{ s }}" {% if s == semester %}selected{% endif %}>Semester {{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if timetable %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-table"></i> {{ department.name }} | Sem {{ semester }} | {{ timetable.academic_year }}
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered mb-0" style="min-width:700px;">
+                <thead>
+                    <tr>
+                        <th class="day-header" style="width:90px;">Day</th>
+                        {% for slot in timeslots %}
+                        <th class="slot-header text-center">
+                            Slot {{ slot.slot_number }}<br>
+                            <small>{{ slot.start_time|time:"H:i" }}-{{ slot.end_time|time:"H:i" }}</small>
+                        </th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for day in days %}
+                    <tr>
+                        <td class="fw-bold text-center" style="background:#e8eaf6; vertical-align:middle;">{{ day }}</td>
+                        {% for slot_mon in timeslots %}
+                            {% with day_slot=grid|get_item:day %}
+                            {% with entry=day_slot|get_item:slot_mon %}
+                            <td class="timetable-cell text-center">
+                                {% if entry %}
+                                <div class="subject-code">{{ entry.subject.code }}</div>
+                                <div class="faculty-name">{{ entry.faculty.user.last_name }}</div>
+                                <div class="room-name"><i class="bi bi-door-open"></i> {{ entry.classroom.name }}</div>
+                                {% else %}
+                                <span class="empty-cell">—</span>
+                                {% endif %}
+                            </td>
+                            {% endwith %}
+                            {% endwith %}
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-warning mt-3">
+    <i class="bi bi-exclamation-triangle"></i>
+    No active timetable found for <strong>{{ department.name }} Semester {{ semester }}</strong>.
+    <a href="{% url 'generate_timetable' %}" class="alert-link">Generate one now.</a>
+</div>
+{% endif %}
+{% endblock %}
