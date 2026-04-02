@@ -1,6 +1,13 @@
 from pathlib import Path
 import os
 
+# Load .env file if it exists (local development)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / '.env')
+except ImportError:
+    pass
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-ewc-master-timetable-secret-key-2024')
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
@@ -52,15 +59,17 @@ WSGI_APPLICATION = 'master_timetable.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
+        'ENGINE': os.environ.get('DB_ENGINE', 'django.db.backends.postgresql'),
         'NAME': os.environ.get('DB_NAME', 'ewc_timetable'),
         'USER': os.environ.get('DB_USER', 'root'),
         'PASSWORD': os.environ.get('DB_PASSWORD', ''),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '5432'),
-        'OPTIONS': {
-            'sslmode': os.environ.get('DB_SSLMODE', 'disable'),
-        },
+        'OPTIONS': (
+            {'sslmode': os.environ.get('DB_SSLMODE', 'disable')}
+            if os.environ.get('DB_ENGINE', 'django.db.backends.postgresql') == 'django.db.backends.postgresql'
+            else {}
+        ),
     }
 }
 
