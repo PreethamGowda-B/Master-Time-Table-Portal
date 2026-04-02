@@ -1,6 +1,8 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+const BACKEND = import.meta.env.VITE_API_URL || 'https://master-time-table-portal.onrender.com'
+
+const api = axios.create({ baseURL: `${BACKEND}/api` })
 
 api.interceptors.request.use(cfg => {
   const token = localStorage.getItem('token')
