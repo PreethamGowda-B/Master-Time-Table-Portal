@@ -93,6 +93,46 @@ export default function DepartmentView() {
     }).finally(function() { setEditSaving(false) })
   }
 
+  function downloadIcal() {
+    if (!timetable) return
+    const lines = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0',
+      'PRODID:-//EWC Timetable//EN',
+      'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    ]
+    const dayOffset = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4, Saturday: 5 }
+    // Use next Monday as base date
+    const base = new Date()
+    base.setDate(base.getDate() + ((1 - base.getDay() + 7) % 7 || 7))
+
+    timetable.entries.forEach(e => {
+      if (!e.start_time || !e.end_time) return
+      const offset = dayOffset[e.day] ?? 0
+      const d = new Date(base)
+      d.setDate(base.getDate() + offset)
+      const fmt = (dt, time) => {
+        const [h, m] = time.slice(0, 5).split(':')
+        return `${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,'0')}${String(dt.getDate()).padStart(2,'0')}T${h}${m}00`
+      }
+      lines.push('BEGIN:VEVENT')
+      lines.push(`DTSTART:${fmt(d, e.start_time)}`)
+      lines.push(`DTEND:${fmt(d, e.end_time)}`)
+      lines.push(`SUMMARY:${e.subject_code} - ${e.subject_name || ''}`)
+      lines.push(`DESCRIPTION:Faculty: ${e.faculty_name}\\nRoom: ${e.classroom_name}`)
+      lines.push(`LOCATION:${e.classroom_name}`)
+      lines.push(`RRULE:FREQ=WEEKLY`)
+      lines.push(`UID:ewc-${timetable.id}-${e.id}@timetable`)
+      lines.push('END:VEVENT')
+    })
+    lines.push('END:VCALENDAR')
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `timetable_sem${semester}.ics`; a.click()
+    URL.revokeObjectURL(url)
+    toast.success('Calendar file downloaded')
+  }
+
   function downloadPDF() {
     if (!timetable) return
     var doc = new jsPDF({ orientation: "landscape" })
@@ -125,7 +165,9 @@ export default function DepartmentView() {
           onClick: function() { setEditMode(function(v) { return !v }) }
         }, React.createElement("i", { className: "bi " + (editMode ? "bi-x-circle" : "bi-pencil-square") + " me-1" }), editMode ? "Exit Edit Mode" : "Edit Timetable"),
         timetable && React.createElement("button", { className: "btn btn-danger btn-sm", onClick: downloadPDF },
-          React.createElement("i", { className: "bi bi-file-earmark-pdf me-1" }), "Download PDF")
+          React.createElement("i", { className: "bi bi-file-earmark-pdf me-1" }), "Download PDF"),
+        timetable && React.createElement("button", { className: "btn btn-outline-success btn-sm", onClick: downloadIcal },
+          React.createElement("i", { className: "bi bi-calendar-plus me-1" }), "Export iCal")
       )
     ),
 

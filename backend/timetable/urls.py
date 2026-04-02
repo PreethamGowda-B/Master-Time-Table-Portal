@@ -29,4 +29,7 @@ urlpatterns = [
     path('api/timeslot-occupancy/', api_views.timeslot_occupancy_api),
     path('api/faculty-workload/', api_views.faculty_workload),
     path('api/timetable-entries/<int:entry_id>/', api_views.update_timetable_entry),
+    path('api/conflict-check/', api_views.conflict_check_api),
+    path('api/timeslots/<int:ts_id>/', api_views.timeslot_detail_api),
+    path('api/classrooms/<int:room_id>/', api_views.classroom_detail_api),
 ]

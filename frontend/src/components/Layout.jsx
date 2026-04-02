@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
@@ -8,6 +8,12 @@ export default function Layout() {
   const user = JSON.parse(localStorage.getItem('user') || '{}')
   const role = user.role || 'student'
   const facultyId = user.faculty_id
+  const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    localStorage.setItem('theme', dark ? 'dark' : 'light')
+  }, [dark])
 
   async function handleLogout() {
     try { await api.post('/auth/logout/') } catch {}
@@ -40,6 +46,11 @@ export default function Layout() {
           Master Timetable Portal
         </span>
         <div className="ms-auto d-flex align-items-center gap-3">
+          <button onClick={() => setDark(d => !d)}
+            style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 8, color: 'white', padding: '5px 10px', cursor: 'pointer', fontSize: '1rem' }}
+            title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
+            <i className={`bi ${dark ? 'bi-sun-fill' : 'bi-moon-fill'}`}></i>
+          </button>
           <span className="text-white">
             <i className="bi bi-person-circle me-1"></i>{user.full_name || user.username}
             <span className="badge bg-light text-dark ms-2" style={{ fontSize: '0.7rem' }}>{role}</span>
@@ -60,6 +71,7 @@ export default function Layout() {
                 </>)}
                 {role === 'admin' && link('/portal/accounts', 'bi-people-fill', 'Accounts')}
                 {role === 'hod' && link('/portal/accounts', 'bi-person-badge-fill', 'Faculty Accounts')}
+                {role === 'admin' && link('/portal/settings', 'bi-gear-fill', 'Settings')}
                 {role === 'faculty' && facultyId && link(`/portal/faculty-view/${facultyId}`, 'bi-person-lines-fill', 'My Timetable')}
                 {link('/portal/department/1', 'bi-building', 'Department View')}
                 {link('/portal/master-timetable', 'bi-grid-3x3-gap', 'Master Timetable')}

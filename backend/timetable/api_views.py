@@ -983,3 +983,124 @@ def update_timetable_entry(request, entry_id):
 
     return Response(TimetableEntrySerializer(entry).data)
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def conflict_check_api(request):
+    """
+    Pre-generation conflict analysis for a dept+sem.
+    Returns: missing faculty, unassigned subjects, slot conflicts, empty slots.
+    """
+    dept_id  = request.query_params.get('department')
+    semester = request.query_params.get('semester')
+    if not dept_id or not semester:
+        return Response({'error': 'department and semester required'}, status=400)
+
+    try:
+        sem_int = int(semester)
+        dept    = Department.objects.get(id=dept_id)
+    except (ValueError, Department.DoesNotExist):
+        return Response({'error': 'Invalid department or semester'}, status=400)
+
+    issues   = []
+    warnings = []
+
+    # 1. Subjects with no faculty assigned
+    subjects = Subject.objects.filter(department=dept, semester=sem_int)
+    if not subjects.exists():
+        issues.append({'type': 'error', 'msg': f'No subjects found for {dept.name} Sem {sem_int}.'})
+        return Response({'issues': issues, 'warnings': warnings, 'ready': False})
+
+    assigned_subject_ids = set(
+        FacultyAssignment.objects.filter(department=dept, semester=sem_int)
+        .values_list('subjects__id', flat=True)
+    )
+    for subj in subjects:
+        if subj.id not in assigned_subject_ids:
+            issues.append({'type': 'error', 'msg': f'Subject "{subj.code} - {subj.name}" has no faculty assigned.'})
+
+    # 2. Faculty with no availability set
+    fa_ids = set(FacultyAssignment.objects.filter(
+        department=dept, semester=sem_int
+    ).values_list('faculty_id', flat=True))
+
+    for fid in fa_ids:
+        avail_count = FacultyAvailability.objects.filter(
+            faculty_id=fid, department=dept, semester=sem_int, is_available=True
+        ).count()
+        if avail_count == 0:
+            fac = Faculty.objects.filter(id=fid).select_related('user').first()
+            name = fac.user.get_full_name() if fac else f'Faculty #{fid}'
+            issues.append({'type': 'error', 'msg': f'Faculty "{name}" has no availability slots set for this dept/sem.'})
+        elif avail_count < subjects.count():
+            fac = Faculty.objects.filter(id=fid).select_related('user').first()
+            name = fac.user.get_full_name() if fac else f'Faculty #{fid}'
+            warnings.append({'type': 'warning', 'msg': f'Faculty "{name}" has only {avail_count} available slots but {subjects.count()} subjects need coverage.'})
+
+    # 3. Slot ownership conflicts (two faculty claiming same slot)
+    from collections import defaultdict
+    slot_claims = defaultdict(list)
+    avail_records = FacultyAvailability.objects.filter(
+        faculty_id__in=fa_ids, department=dept, semester=sem_int, is_available=True
+    ).select_related('faculty__user', 'timeslot')
+    for a in avail_records:
+        slot_claims[a.timeslot_id].append(a.faculty.user.get_full_name())
+    for slot_id, names in slot_claims.items():
+        if len(names) > 1:
+            ts = TimeSlot.objects.filter(id=slot_id).first()
+            slot_label = f'{ts.day} Slot {ts.slot_number}' if ts else f'Slot #{slot_id}'
+            warnings.append({'type': 'warning', 'msg': f'Multiple faculty claim {slot_label}: {", ".join(names)}. Only one will be used.'})
+
+    # 4. No classrooms
+    if not Classroom.objects.filter(is_lab=False).exists():
+        issues.append({'type': 'error', 'msg': 'No theory classrooms configured. Add classrooms first.'})
+    lab_subjects = subjects.filter(is_lab=True)
+    if lab_subjects.exists() and not Classroom.objects.filter(is_lab=True).exists():
+        issues.append({'type': 'error', 'msg': f'{lab_subjects.count()} lab subject(s) found but no lab rooms configured.'})
+
+    ready = len(issues) == 0
+    return Response({'issues': issues, 'warnings': warnings, 'ready': ready, 'subject_count': subjects.count()})
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def timeslot_detail_api(request, ts_id):
+    try:
+        ts = TimeSlot.objects.get(id=ts_id)
+    except TimeSlot.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+    if request.method == 'GET':
+        return Response(TimeSlotSerializer(ts).data)
+    if _get_role(request.user) != 'admin':
+        return Response({'error': 'Admin only'}, status=403)
+    if request.method == 'PUT':
+        s = TimeSlotSerializer(ts, data=request.data, partial=True)
+        if s.is_valid():
+            s.save()
+            return Response(s.data)
+        return Response(s.errors, status=400)
+    if request.method == 'DELETE':
+        ts.delete()
+        return Response({'message': 'Deleted'})
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def classroom_detail_api(request, room_id):
+    try:
+        room = Classroom.objects.get(id=room_id)
+    except Classroom.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+    if request.method == 'GET':
+        return Response(ClassroomSerializer(room).data)
+    if _get_role(request.user) != 'admin':
+        return Response({'error': 'Admin only'}, status=403)
+    if request.method == 'PUT':
+        s = ClassroomSerializer(room, data=request.data, partial=True)
+        if s.is_valid():
+            s.save()
+            return Response(s.data)
+        return Response(s.errors, status=400)
+    if request.method == 'DELETE':
+        room.delete()
+        return Response({'message': 'Deleted'})

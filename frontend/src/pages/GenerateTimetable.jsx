@@ -11,8 +11,28 @@ export default function GenerateTimetable() {
   const [loading, setLoading]         = useState(false)
   const [loadingAll, setLoadingAll]   = useState(false)
   const [result, setResult]           = useState(null)
-  const [allResults, setAllResults]   = useState([])  // results from Generate All
+  const [allResults, setAllResults]   = useState([])
+  const [checking, setChecking]       = useState(false)
+  const [checkResult, setCheckResult] = useState(null)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    api.get('/departments/').then(r => setDepartments(r.data))
+  }, [])
+
+  async function handleConflictCheck() {
+    if (!form.department || !form.semester) return toast.error('Select department and semester first')
+    setChecking(true)
+    setCheckResult(null)
+    try {
+      const { data } = await api.get(`/conflict-check/?department=${form.department}&semester=${form.semester}`)
+      setCheckResult(data)
+    } catch (err) {
+      toast.error('Check failed')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   useEffect(() => {
     api.get('/departments/').then(r => setDepartments(r.data))
@@ -195,10 +215,40 @@ export default function GenerateTimetable() {
                 <div className="mb-3">
                   <label className="form-label fw-semibold small">Semester</label>
                   <select className="form-select" required value={form.semester}
-                    onChange={e => setForm({ ...form, semester: e.target.value })}>
+                    onChange={e => { setForm({ ...form, semester: e.target.value }); setCheckResult(null) }}>
                     {SEMESTERS.map(s => <option key={s} value={s}>Semester {s}</option>)}
                   </select>
                 </div>
+
+                {/* Conflict Check */}
+                <div className="mb-3">
+                  <button type="button" className="btn btn-outline-warning btn-sm w-100" onClick={handleConflictCheck} disabled={checking || !form.department}>
+                    {checking
+                      ? <><span className="spinner-border spinner-border-sm me-2"></span>Checking...</>
+                      : <><i className="bi bi-shield-check me-2"></i>Run Conflict Check Before Generating</>}
+                  </button>
+                </div>
+
+                {checkResult && (
+                  <div className="mb-3 p-3 rounded" style={{ background: checkResult.ready ? '#f0fdf4' : '#fff7ed', border: `1px solid ${checkResult.ready ? '#86efac' : '#fed7aa'}` }}>
+                    <div className="fw-semibold mb-2" style={{ color: checkResult.ready ? '#166534' : '#9a3412', fontSize: '0.85rem' }}>
+                      <i className={`bi ${checkResult.ready ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'} me-2`}></i>
+                      {checkResult.ready ? `Ready to generate — ${checkResult.subject_count} subjects found` : 'Issues found — fix before generating'}
+                    </div>
+                    {checkResult.issues.map((issue, i) => (
+                      <div key={i} className="d-flex align-items-start gap-2 mb-1" style={{ fontSize: '0.78rem', color: '#dc2626' }}>
+                        <i className="bi bi-x-circle-fill mt-1" style={{ flexShrink: 0 }}></i>
+                        <span>{issue.msg}</span>
+                      </div>
+                    ))}
+                    {checkResult.warnings.map((w, i) => (
+                      <div key={i} className="d-flex align-items-start gap-2 mb-1" style={{ fontSize: '0.78rem', color: '#d97706' }}>
+                        <i className="bi bi-exclamation-circle-fill mt-1" style={{ flexShrink: 0 }}></i>
+                        <span>{w.msg}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="mb-4">
                   <label className="form-label fw-semibold small">Academic Year</label>
                   <input type="text" className="form-control" placeholder="e.g. 2024-25" required

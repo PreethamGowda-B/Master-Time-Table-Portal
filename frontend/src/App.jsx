@@ -12,6 +12,7 @@ import DepartmentView from './pages/DepartmentView'
 import FacultyView from './pages/FacultyView'
 import Accounts from './pages/Accounts'
 import MasterTimetable from './pages/MasterTimetable'
+import Settings from './pages/Settings'
 
 class ErrorBoundary extends React.Component {
   state = { error: null }
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="faculty-view/:facultyId" element={<FacultyView />} />
         <Route path="accounts" element={<Accounts />} />
         <Route path="master-timetable" element={<MasterTimetable />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
