@@ -208,7 +208,7 @@ def list_users_api(request):
                 entry['faculty_id'] = f.id
                 entry['department'] = f.department.name if f.department else ''
                 entry['semester'] = f.semester
-                entry['subjects'] = [{'id': s.id, 'code': s.code, 'name': s.name, 'semester': s.semester} for s in f.subjects.all()]
+                entry['subjects'] = [{'id': s.id, 'code': s.code, 'name': s.name, 'semester': s.semester, 'is_lab': s.is_lab} for s in f.subjects.all()]
                 entry['assignments'] = [
                     {
                         'id': a.id,
@@ -216,7 +216,7 @@ def list_users_api(request):
                         'department_name': a.department.name,
                         'semester': a.semester,
                         'subject_ids': [s.id for s in a.subjects.all()],
-                        'subjects': [{'id': s.id, 'code': s.code, 'name': s.name} for s in a.subjects.all()],
+                        'subjects': [{'id': s.id, 'code': s.code, 'name': s.name, 'is_lab': s.is_lab} for s in a.subjects.all()],
                     }
                     for a in f.assignments.all()
                 ]
@@ -276,13 +276,13 @@ def list_faculty_users_api(request):
                 ).prefetch_related('subjects').first()
                 if assignment:
                     subjects_for_filter = [
-                        {'id': s.id, 'code': s.code, 'name': s.name, 'semester': s.semester}
+                        {'id': s.id, 'code': s.code, 'name': s.name, 'semester': s.semester, 'is_lab': s.is_lab}
                         for s in assignment.subjects.all()
                     ]
                 else:
                     # Fallback: legacy Faculty.subjects filtered by dept+sem
                     subjects_for_filter = [
-                        {'id': s.id, 'code': s.code, 'name': s.name, 'semester': s.semester}
+                        {'id': s.id, 'code': s.code, 'name': s.name, 'semester': s.semester, 'is_lab': s.is_lab}
                         for s in faculty_obj.subjects.filter(department_id=dept_id, semester=sem_int)
                     ]
             except (ValueError, TypeError):
@@ -303,7 +303,7 @@ def list_faculty_users_api(request):
                     'department': a.department.id,
                     'department_name': a.department.name,
                     'semester': a.semester,
-                    'subjects': [{'id': s.id, 'code': s.code, 'name': s.name} for s in a.subjects.all()],
+                    'subjects': [{'id': s.id, 'code': s.code, 'name': s.name, 'is_lab': s.is_lab} for s in a.subjects.all()],
                 }
                 for a in faculty_obj.assignments.all()
             ],
@@ -978,10 +978,11 @@ def update_timetable_entry(request, entry_id):
                          f'({conflict.timetable.department.name} Sem {conflict.timetable.semester}).'
             }, status=400)
 
-        # 3. Global Classroom Conflict
+        # 3. Global Classroom Conflict — exclude all entries being updated in this operation
+        update_ids = [t.id for t in entries_to_update]
         room_conflict = TimetableEntry.objects.filter(
             timeslot=slot, classroom=new_classroom, timetable__is_active=True
-        ).exclude(id=target.id).first()
+        ).exclude(id__in=update_ids).first()
         if room_conflict:
             return Response({
                 'error': f'Classroom {new_classroom.name} is already occupied on {slot.day} Slot {slot.slot_number}.'

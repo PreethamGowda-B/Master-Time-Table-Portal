@@ -83,7 +83,7 @@ export default function DepartmentView() {
       const tt = ttRes.data[0]
       const occupiedRoomIds = tt ? tt.entries
         .filter(e => e.timeslot_id === entry.timeslot_id && e.id !== entry.id)
-        .map(e => e.classroom) : []
+        .map(e => Number(e.classroom)) : []
 
       // Find the faculty record for this slot's faculty
       const slotFaculty = facultyRes.data.find(f => f.id === entry.faculty)
@@ -93,8 +93,11 @@ export default function DepartmentView() {
         if (cur) {
           setSelectedSubject(cur)
           setAutoFaculty({ id: slotFaculty.id, name: slotFaculty.full_name })
-          // Pick a free room of the right type
-          const preferred = allRooms.find(c => c.is_lab === cur.is_lab && !occupiedRoomIds.includes(c.id))
+          // Use current room if free, else pick another free room of correct type
+          const currentRoom = allRooms.find(c => c.id === entry.classroom)
+          const preferred = (!occupiedRoomIds.includes(entry.classroom) && currentRoom)
+            ? currentRoom
+            : allRooms.find(c => c.is_lab === cur.is_lab && !occupiedRoomIds.includes(c.id))
             || allRooms.find(c => !occupiedRoomIds.includes(c.id))
             || allRooms[0]
           setAutoClassroom(preferred || null)
@@ -105,7 +108,10 @@ export default function DepartmentView() {
           const cur = r.data.find(s => s.id === entry.subject)
           if (cur) {
             setSelectedSubject(cur)
-            const preferred = allRooms.find(c => c.is_lab === cur.is_lab && !occupiedRoomIds.includes(c.id))
+            const currentRoom = allRooms.find(c => c.id === entry.classroom)
+            const preferred = (!occupiedRoomIds.includes(entry.classroom) && currentRoom)
+              ? currentRoom
+              : allRooms.find(c => c.is_lab === cur.is_lab && !occupiedRoomIds.includes(c.id))
               || allRooms[0]
             setAutoClassroom(preferred || null)
           }
@@ -135,25 +141,15 @@ export default function DepartmentView() {
     const subj = subjects.find(s => s.id === Number(subjectId))
     if (!subj) return
     setSelectedSubject(subj)
-    // Find a free classroom of the right type for this slot
-    api.get("/classrooms/").then(function(r) {
-      const allRooms = r.data
-      setClassrooms(allRooms)
-      // Check which rooms are occupied in this slot
-      api.get("/timeslot-occupancy/?timeslot_id=" + editEntry.timeslot_id).then(function(occRes) {
-        // Get occupied room ids for this slot from timetable entries
-        api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true").then(function(ttRes) {
-          const tt = ttRes.data[0]
-          const occupiedRoomIds = tt ? tt.entries
-            .filter(e => e.timeslot_id === editEntry.timeslot_id && e.id !== editEntry.id)
-            .map(e => e.classroom) : []
-          // Pick first free room of correct type
-          const preferred = allRooms.find(c => c.is_lab === subj.is_lab && !occupiedRoomIds.includes(c.id))
-            || allRooms.find(c => !occupiedRoomIds.includes(c.id))
-            || allRooms[0]
-          setAutoClassroom(preferred || null)
-        })
-      })
+    api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true").then(function(ttRes) {
+      const tt = ttRes.data[0]
+      const occupiedRoomIds = tt ? tt.entries
+        .filter(e => e.timeslot_id === editEntry.timeslot_id && e.id !== editEntry.id)
+        .map(e => Number(e.classroom)) : []
+      const preferred = classrooms.find(c => c.is_lab === subj.is_lab && !occupiedRoomIds.includes(c.id))
+        || classrooms.find(c => !occupiedRoomIds.includes(c.id))
+        || classrooms[0]
+      setAutoClassroom(preferred || null)
     })
   }
 
@@ -395,7 +391,7 @@ export default function DepartmentView() {
               React.createElement("option", { value: "" }, "— Select Subject —"),
               subjects.map(function(s) {
                 return React.createElement("option", { key: s.id, value: s.id },
-                  s.code + " — " + s.name + (s.is_lab ? " (Lab)" : ""))
+                  s.code + " — " + s.name + " [" + (s.is_lab ? "Lab" : "Theory") + "]")
               })
             )
           ),
