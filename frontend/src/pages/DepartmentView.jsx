@@ -71,30 +71,44 @@ export default function DepartmentView() {
     setAutoClassroom(null)
     setSelectedSubject(null)
 
-    // Load only subjects assigned to THIS slot's faculty
-    // Use faculty-users API filtered by dept+sem, then pick the matching faculty's subjects
     Promise.all([
       api.get(`/auth/faculty-users/?department=${deptId}&semester=${semester}`),
-      api.get("/classrooms/")
-    ]).then(function([facultyRes, roomRes]) {
-      setClassrooms(roomRes.data)
+      api.get("/classrooms/"),
+      api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true")
+    ]).then(function([facultyRes, roomRes, ttRes]) {
+      const allRooms = roomRes.data
+      setClassrooms(allRooms)
+
+      // Find occupied rooms in this slot (excluding current entry)
+      const tt = ttRes.data[0]
+      const occupiedRoomIds = tt ? tt.entries
+        .filter(e => e.timeslot_id === entry.timeslot_id && e.id !== entry.id)
+        .map(e => e.classroom) : []
 
       // Find the faculty record for this slot's faculty
       const slotFaculty = facultyRes.data.find(f => f.id === entry.faculty)
       if (slotFaculty && slotFaculty.subjects && slotFaculty.subjects.length > 0) {
-        // Only show subjects belonging to this faculty
         setSubjects(slotFaculty.subjects)
         const cur = slotFaculty.subjects.find(s => s.id === entry.subject)
         if (cur) {
           setSelectedSubject(cur)
           setAutoFaculty({ id: slotFaculty.id, name: slotFaculty.full_name })
+          // Pick a free room of the right type
+          const preferred = allRooms.find(c => c.is_lab === cur.is_lab && !occupiedRoomIds.includes(c.id))
+            || allRooms.find(c => !occupiedRoomIds.includes(c.id))
+            || allRooms[0]
+          setAutoClassroom(preferred || null)
         }
       } else {
-        // Fallback: load all dept/sem subjects
         api.get("/subjects/?department=" + deptId + "&semester=" + semester).then(function(r) {
           setSubjects(r.data)
           const cur = r.data.find(s => s.id === entry.subject)
-          if (cur) setSelectedSubject(cur)
+          if (cur) {
+            setSelectedSubject(cur)
+            const preferred = allRooms.find(c => c.is_lab === cur.is_lab && !occupiedRoomIds.includes(c.id))
+              || allRooms[0]
+            setAutoClassroom(preferred || null)
+          }
         })
       }
     })
@@ -121,10 +135,26 @@ export default function DepartmentView() {
     const subj = subjects.find(s => s.id === Number(subjectId))
     if (!subj) return
     setSelectedSubject(subj)
-    // Faculty stays the same (subjects are already filtered to slot's faculty)
-    // Just update classroom type
-    const preferred = classrooms.find(c => c.is_lab === subj.is_lab)
-    setAutoClassroom(preferred || classrooms[0] || null)
+    // Find a free classroom of the right type for this slot
+    api.get("/classrooms/").then(function(r) {
+      const allRooms = r.data
+      setClassrooms(allRooms)
+      // Check which rooms are occupied in this slot
+      api.get("/timeslot-occupancy/?timeslot_id=" + editEntry.timeslot_id).then(function(occRes) {
+        // Get occupied room ids for this slot from timetable entries
+        api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true").then(function(ttRes) {
+          const tt = ttRes.data[0]
+          const occupiedRoomIds = tt ? tt.entries
+            .filter(e => e.timeslot_id === editEntry.timeslot_id && e.id !== editEntry.id)
+            .map(e => e.classroom) : []
+          // Pick first free room of correct type
+          const preferred = allRooms.find(c => c.is_lab === subj.is_lab && !occupiedRoomIds.includes(c.id))
+            || allRooms.find(c => !occupiedRoomIds.includes(c.id))
+            || allRooms[0]
+          setAutoClassroom(preferred || null)
+        })
+      })
+    })
   }
 
   function saveEdit(e) {
