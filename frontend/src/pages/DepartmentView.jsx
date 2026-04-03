@@ -70,36 +70,49 @@ export default function DepartmentView() {
     setAutoFaculty({ id: entry.faculty, name: entry.faculty_name })
     setAutoClassroom(null)
     setSelectedSubject(null)
-    // Pre-select current subject once subjects load
-    api.get("/subjects/?department=" + deptId + "&semester=" + semester).then(function(r) {
-      setSubjects(r.data)
-      const cur = r.data.find(s => s.id === entry.subject)
-      if (cur) {
-        setSelectedSubject(cur)
-        // Auto-resolve faculty for current subject
-        resolveFaculty(cur, entry.faculty, entry.faculty_name)
+
+    // Load only subjects assigned to THIS slot's faculty
+    // Use faculty-users API filtered by dept+sem, then pick the matching faculty's subjects
+    Promise.all([
+      api.get(`/auth/faculty-users/?department=${deptId}&semester=${semester}`),
+      api.get("/classrooms/")
+    ]).then(function([facultyRes, roomRes]) {
+      setClassrooms(roomRes.data)
+
+      // Find the faculty record for this slot's faculty
+      const slotFaculty = facultyRes.data.find(f => f.id === entry.faculty)
+      if (slotFaculty && slotFaculty.subjects && slotFaculty.subjects.length > 0) {
+        // Only show subjects belonging to this faculty
+        setSubjects(slotFaculty.subjects)
+        const cur = slotFaculty.subjects.find(s => s.id === entry.subject)
+        if (cur) {
+          setSelectedSubject(cur)
+          setAutoFaculty({ id: slotFaculty.id, name: slotFaculty.full_name })
+        }
+      } else {
+        // Fallback: load all dept/sem subjects
+        api.get("/subjects/?department=" + deptId + "&semester=" + semester).then(function(r) {
+          setSubjects(r.data)
+          const cur = r.data.find(s => s.id === entry.subject)
+          if (cur) setSelectedSubject(cur)
+        })
       }
-    })
-    api.get("/classrooms/").then(function(r) {
-      setClassrooms(r.data)
     })
   }
 
   function resolveFaculty(subject, fallbackFacultyId, fallbackFacultyName) {
     if (!subject) return
+    // Faculty is already locked to the slot owner — just confirm via assignment
     setFacultyLoading(true)
-    // Get faculty assigned to this subject for this dept+sem
     api.get(`/auth/faculty-users/?department=${deptId}&semester=${semester}`)
       .then(function(r) {
         const match = r.data.find(f =>
           f.subjects && f.subjects.some(s => s.id === subject.id)
         )
-        if (match) {
-          setAutoFaculty({ id: match.id, name: match.full_name })
-        } else {
-          // Keep existing faculty if no assignment found
-          setAutoFaculty({ id: fallbackFacultyId, name: fallbackFacultyName })
-        }
+        setAutoFaculty(match
+          ? { id: match.id, name: match.full_name }
+          : { id: fallbackFacultyId, name: fallbackFacultyName }
+        )
       })
       .finally(() => setFacultyLoading(false))
   }
@@ -108,8 +121,8 @@ export default function DepartmentView() {
     const subj = subjects.find(s => s.id === Number(subjectId))
     if (!subj) return
     setSelectedSubject(subj)
-    resolveFaculty(subj, editEntry.faculty, editEntry.faculty_name)
-    // Auto-pick classroom type
+    // Faculty stays the same (subjects are already filtered to slot's faculty)
+    // Just update classroom type
     const preferred = classrooms.find(c => c.is_lab === subj.is_lab)
     setAutoClassroom(preferred || classrooms[0] || null)
   }
