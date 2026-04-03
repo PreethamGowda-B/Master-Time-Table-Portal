@@ -141,16 +141,7 @@ export default function DepartmentView() {
     const subj = subjects.find(s => s.id === Number(subjectId))
     if (!subj) return
     setSelectedSubject(subj)
-    api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true").then(function(ttRes) {
-      const tt = ttRes.data[0]
-      const occupiedRoomIds = tt ? tt.entries
-        .filter(e => e.timeslot_id === editEntry.timeslot_id && e.id !== editEntry.id)
-        .map(e => Number(e.classroom)) : []
-      const preferred = classrooms.find(c => c.is_lab === subj.is_lab && !occupiedRoomIds.includes(c.id))
-        || classrooms.find(c => !occupiedRoomIds.includes(c.id))
-        || classrooms[0]
-      setAutoClassroom(preferred || null)
-    })
+    // Classroom stays the same — we only change the subject
   }
 
   function saveEdit(e) {
@@ -160,19 +151,15 @@ export default function DepartmentView() {
       return
     }
     setEditSaving(true)
-    // Only send subject — backend auto-resolves faculty via FacultyAssignment
-    // We send faculty too so backend can validate conflicts
-    const classroom = autoClassroom || classrooms.find(c => c.is_lab === selectedSubject.is_lab) || classrooms[0]
     api.patch("/timetable-entries/" + editEntry.id + "/", {
       subject: selectedSubject.id,
       faculty: autoFaculty.id,
-      classroom: classroom?.id || editEntry.classroom,
-    }).then(function(res) {
-      // Refresh timetable to get updated lab pairs too
+      classroom: editEntry.classroom,  // keep original classroom unchanged
+    }).then(function() {
       return api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true")
     }).then(function(r) {
       setTimetable(r.data[0] || null)
-      toast.success("Slot updated successfully")
+      toast.success("Subject updated successfully")
       setEditEntry(null)
     }).catch(function(err) {
       toast.error((err.response && err.response.data && err.response.data.error) || "Failed to save")
@@ -413,25 +400,15 @@ export default function DepartmentView() {
             )
           ),
 
-          // Classroom — auto-selected based on subject type
+          // Classroom — kept as-is, shown read-only
           React.createElement("div", { className: "mb-4" },
             React.createElement("label", { style: { fontSize: "0.8rem", fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" } },
               React.createElement("i", { className: "bi bi-door-open me-1" }), "Classroom",
-              React.createElement("span", { style: { fontSize: "0.7rem", color: "#6b7280", fontWeight: 400, marginLeft: 6 } }, "(auto-selected by type)")
+              React.createElement("span", { style: { fontSize: "0.7rem", color: "#6b7280", fontWeight: 400, marginLeft: 6 } }, "(unchanged)")
             ),
-            React.createElement("select", {
-              className: "form-select form-select-sm",
-              value: autoClassroom ? autoClassroom.id : (classrooms.find(c => c.id === editEntry.classroom) || {}).id || "",
-              onChange: function(e) {
-                const room = classrooms.find(c => c.id === Number(e.target.value))
-                setAutoClassroom(room || null)
-              },
-              style: { borderRadius: 8, borderColor: "#d1d5db" }
-            },
-              classrooms.map(function(c) {
-                return React.createElement("option", { key: c.id, value: c.id },
-                  c.name + (c.is_lab ? " (Lab)" : " (Theory)"))
-              })
+            React.createElement("div", { style: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: "0.88rem", color: "#64748b", display: "flex", alignItems: "center", gap: 8 } },
+              React.createElement("i", { className: "bi bi-lock-fill", style: { fontSize: "0.75rem" } }),
+              React.createElement("span", null, (classrooms.find(c => c.id === editEntry.classroom) || {}).name || "—")
             )
           ),
 

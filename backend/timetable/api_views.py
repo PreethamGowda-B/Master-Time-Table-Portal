@@ -978,10 +978,11 @@ def update_timetable_entry(request, entry_id):
                          f'({conflict.timetable.department.name} Sem {conflict.timetable.semester}).'
             }, status=400)
 
-        # 3. Global Classroom Conflict — exclude all entries being updated in this operation
+        # 3. Classroom Conflict — only within the same timetable (same dept/sem)
         update_ids = [t.id for t in entries_to_update]
         room_conflict = TimetableEntry.objects.filter(
-            timeslot=slot, classroom=new_classroom, timetable__is_active=True
+            timeslot=slot, classroom=new_classroom,
+            timetable=entry.timetable  # same timetable only
         ).exclude(id__in=update_ids).first()
         if room_conflict:
             return Response({
