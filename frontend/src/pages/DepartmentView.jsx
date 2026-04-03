@@ -146,15 +146,16 @@ export default function DepartmentView() {
 
   function saveEdit(e) {
     e.preventDefault()
-    if (!selectedSubject || !autoFaculty) {
+    if (!selectedSubject) {
       toast.error("Select a subject first")
       return
     }
+    const facultyId = autoFaculty ? autoFaculty.id : editEntry.faculty
     setEditSaving(true)
     api.patch("/timetable-entries/" + editEntry.id + "/", {
       subject: selectedSubject.id,
-      faculty: autoFaculty.id,
-      classroom: editEntry.classroom,  // keep original classroom unchanged
+      faculty: facultyId,
+      classroom: editEntry.classroom,
     }).then(function() {
       return api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true")
     }).then(function(r) {
@@ -415,10 +416,10 @@ export default function DepartmentView() {
           // Actions
           React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } },
             React.createElement("button", { type: "button", onClick: function() { setEditEntry(null) }, className: "btn btn-light px-4", style: { borderRadius: 10, fontWeight: 600 } }, "Cancel"),
-            React.createElement("button", { type: "submit", disabled: editSaving || !selectedSubject || !autoFaculty || facultyLoading, className: "btn px-4", style: { borderRadius: 10, fontWeight: 700, background: "linear-gradient(135deg, #1a237e, #3949ab)", color: "white", border: "none" } },
+            React.createElement("button", { type: "submit", disabled: editSaving || !selectedSubject || facultyLoading, className: "btn px-4", style: { borderRadius: 10, fontWeight: 700, background: "linear-gradient(135deg, #1a237e, #3949ab)", color: "white", border: "none" } },
               editSaving
                 ? React.createElement(React.Fragment, null, React.createElement("span", { className: "spinner-border spinner-border-sm me-2" }), "Saving...")
-                : React.createElement(React.Fragment, null, React.createElement("i", { className: "bi bi-check-lg me-1" }), "Apply Changes")
+                : React.createElement(React.Fragment, null, React.createElement("i", { className: "bi bi-check-lg me-1" }), "Save Changes")
             )
           )
         )
