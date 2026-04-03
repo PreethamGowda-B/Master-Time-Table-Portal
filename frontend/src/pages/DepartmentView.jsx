@@ -28,12 +28,14 @@ export default function DepartmentView() {
   const [loading, setLoading]         = useState(false)
   const [editMode, setEditMode]       = useState(false)
   const [editEntry, setEditEntry]     = useState(null)
-  const [editForm, setEditForm]       = useState({})
   const [editSaving, setEditSaving]   = useState(false)
   const [subjects, setSubjects]       = useState([])
-  const [faculties, setFaculties]     = useState([])
   const [classrooms, setClassrooms]   = useState([])
-  const [occupiedFids, setOccupiedFids] = useState([])
+  // Controlled edit state
+  const [selectedSubject, setSelectedSubject] = useState(null)  // full subject object
+  const [autoFaculty, setAutoFaculty]         = useState(null)  // auto-resolved faculty
+  const [autoClassroom, setAutoClassroom]     = useState(null)  // auto-resolved classroom
+  const [facultyLoading, setFacultyLoading]   = useState(false)
 
   useEffect(function() {
     api.get("/departments/").then(function(r) { setDepartments(r.data) })
@@ -50,7 +52,6 @@ export default function DepartmentView() {
   useEffect(function() {
     if (!editEntry) return
     api.get("/subjects/?department=" + deptId + "&semester=" + semester).then(function(r) { setSubjects(r.data) })
-    api.get("/faculty/?department=" + deptId).then(function(r) { setFaculties(r.data) })
     api.get("/classrooms/").then(function(r) { setClassrooms(r.data) })
   }, [editEntry])
 
@@ -64,29 +65,73 @@ export default function DepartmentView() {
 
   function openEdit(entry) {
     setEditEntry(entry)
-    setEditForm({ subject: entry.subject, faculty: entry.faculty, classroom: entry.classroom })
-    setOccupiedFids([])
-    api.get("/timeslot-occupancy/?timeslot_id=" + entry.timeslot_id).then(function(r) {
-      setOccupiedFids(r.data)
+    setAutoFaculty({ id: entry.faculty, name: entry.faculty_name })
+    setAutoClassroom(null)
+    setSelectedSubject(null)
+    // Pre-select current subject once subjects load
+    api.get("/subjects/?department=" + deptId + "&semester=" + semester).then(function(r) {
+      setSubjects(r.data)
+      const cur = r.data.find(s => s.id === entry.subject)
+      if (cur) {
+        setSelectedSubject(cur)
+        // Auto-resolve faculty for current subject
+        resolveFaculty(cur, entry.faculty, entry.faculty_name)
+      }
     })
+    api.get("/classrooms/").then(function(r) {
+      setClassrooms(r.data)
+    })
+  }
+
+  function resolveFaculty(subject, fallbackFacultyId, fallbackFacultyName) {
+    if (!subject) return
+    setFacultyLoading(true)
+    // Get faculty assigned to this subject for this dept+sem
+    api.get(`/auth/faculty-users/?department=${deptId}&semester=${semester}`)
+      .then(function(r) {
+        const match = r.data.find(f =>
+          f.subjects && f.subjects.some(s => s.id === subject.id)
+        )
+        if (match) {
+          setAutoFaculty({ id: match.id, name: match.full_name })
+        } else {
+          // Keep existing faculty if no assignment found
+          setAutoFaculty({ id: fallbackFacultyId, name: fallbackFacultyName })
+        }
+      })
+      .finally(() => setFacultyLoading(false))
+  }
+
+  function handleSubjectChange(subjectId) {
+    const subj = subjects.find(s => s.id === Number(subjectId))
+    if (!subj) return
+    setSelectedSubject(subj)
+    resolveFaculty(subj, editEntry.faculty, editEntry.faculty_name)
+    // Auto-pick classroom type
+    const preferred = classrooms.find(c => c.is_lab === subj.is_lab)
+    setAutoClassroom(preferred || classrooms[0] || null)
   }
 
   function saveEdit(e) {
     e.preventDefault()
+    if (!selectedSubject || !autoFaculty) {
+      toast.error("Select a subject first")
+      return
+    }
     setEditSaving(true)
+    // Only send subject — backend auto-resolves faculty via FacultyAssignment
+    // We send faculty too so backend can validate conflicts
+    const classroom = autoClassroom || classrooms.find(c => c.is_lab === selectedSubject.is_lab) || classrooms[0]
     api.patch("/timetable-entries/" + editEntry.id + "/", {
-      subject: editForm.subject,
-      faculty: editForm.faculty,
-      classroom: editForm.classroom,
+      subject: selectedSubject.id,
+      faculty: autoFaculty.id,
+      classroom: classroom?.id || editEntry.classroom,
     }).then(function(res) {
-      setTimetable(function(tt) {
-        return Object.assign({}, tt, {
-          entries: tt.entries.map(function(en) {
-            return en.id === editEntry.id ? Object.assign({}, en, res.data) : en
-          })
-        })
-      })
-      toast.success("Entry updated")
+      // Refresh timetable to get updated lab pairs too
+      return api.get("/timetables/?department=" + deptId + "&semester=" + semester + "&active=true")
+    }).then(function(r) {
+      setTimetable(r.data[0] || null)
+      toast.success("Slot updated successfully")
       setEditEntry(null)
     }).catch(function(err) {
       toast.error((err.response && err.response.data && err.response.data.error) || "Failed to save")
@@ -250,92 +295,98 @@ export default function DepartmentView() {
         React.createElement("span", { className: "alert-link", style: { cursor: "pointer" }, onClick: function() { navigate("/portal/generate") } }, "Generate one now.")
       ),
 
-    editEntry && React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.7)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } },
-      React.createElement("div", { style: { background: "white", borderRadius: 20, padding: 32, width: "100%", maxWidth: 500, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)", border: "1px solid #e2e8f0" } },
-        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 } },
+    editEntry && React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.75)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } },
+      React.createElement("div", { style: { background: "white", borderRadius: 20, padding: 32, width: "100%", maxWidth: 480, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.3)", border: "1px solid #e2e8f0" } },
+
+        // Header
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
           React.createElement("div", null,
-            React.createElement("h5", { style: { margin: 0, fontWeight: 800, color: "#1e293b", fontSize: "1.25rem" } },
-              React.createElement("i", { className: "bi bi-pencil-square", style: { color: "#f59e0b", marginRight: 10 } }), "Modify Time Slot"),
-            React.createElement("div", { style: { fontSize: "0.85rem", color: "#64748b", marginTop: 6, fontWeight: 500 } },
-              editEntry.day + " \u2014 Slot " + editEntry.slot_number + "  ",
-              React.createElement("span", { style: { background: "#e0e7ff", color: "#4338ca", padding: "2px 10px", borderRadius: 10, fontSize: "0.75rem", fontWeight: 700, marginLeft: 8 } },
-                fmtTime(editEntry.start_time) + " \u2013 " + fmtTime(editEntry.end_time))
+            React.createElement("h5", { style: { margin: 0, fontWeight: 800, color: "#1e293b", fontSize: "1.1rem" } },
+              React.createElement("i", { className: "bi bi-pencil-square me-2", style: { color: "#f59e0b" } }), "Edit Slot"),
+            React.createElement("div", { style: { fontSize: "0.82rem", color: "#64748b", marginTop: 5 } },
+              React.createElement("strong", null, editEntry.day), " — Slot ", editEntry.slot_number, "  ",
+              React.createElement("span", { style: { background: "#e0e7ff", color: "#4338ca", padding: "2px 8px", borderRadius: 8, fontSize: "0.72rem", fontWeight: 700, marginLeft: 6 } },
+                fmtTime(editEntry.start_time), " – ", fmtTime(editEntry.end_time))
             )
           ),
-          React.createElement("button", { onClick: function() { setEditEntry(null) }, style: { background: "#f1f5f9", border: "none", cursor: "pointer", width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", transition: "all 0.2s" } },
+          React.createElement("button", { onClick: function() { setEditEntry(null) }, style: { background: "#f1f5f9", border: "none", cursor: "pointer", width: 30, height: 30, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b" } },
             React.createElement("i", { className: "bi bi-x-lg" }))
         ),
-        
-        editEntry.is_lab_slot && React.createElement("div", { className: "alert alert-primary py-2 px-3 mb-4", style: { fontSize: "0.8rem", border: "none", borderRadius: 10, background: "#eff6ff", color: "#1d4ed8" } },
+
+        // Lab warning
+        editEntry.is_lab_slot && React.createElement("div", { style: { background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: "0.8rem", color: "#1d4ed8" } },
           React.createElement("i", { className: "bi bi-info-circle-fill me-2" }),
-          "This is a ", React.createElement("strong", null, "Lab Slot"), ". Changes will automatically apply to both hours of the block."
+          React.createElement("strong", null, "Lab Slot"), " — both consecutive slots will update together automatically."
         ),
 
         React.createElement("form", { onSubmit: saveEdit },
+
+          // Subject selector (controlled dropdown)
           React.createElement("div", { className: "mb-3" },
-            React.createElement("label", { className: "form-label fw-bold small text-secondary" }, "Subject"),
-            React.createElement("input", {
-              list: "editSubjectOptions",
-              className: "form-control form-control-sm",
-              placeholder: "Type or select subject",
-              value: (subjects.find(s => s.id === editForm.subject) || {}).name || "",
-              onChange: e => {
-                const match = subjects.find(s => s.name === e.target.value || s.code === e.target.value)
-                if (match) setEditForm(f => Object.assign({}, f, { subject: match.id }))
-              }
-            }),
-            React.createElement("datalist", { id: "editSubjectOptions" },
-              subjects.map(s => React.createElement("option", { key: s.id, value: s.name }, s.code))
-            )
-          ),
-          
-          React.createElement("div", { className: "mb-3" },
-            React.createElement("label", { className: "form-label fw-bold small text-secondary" }, "Faculty"),
-            React.createElement("input", {
-              list: "editFacultyOptions",
-              className: "form-control form-control-sm",
-              placeholder: "Type or select faculty",
-              value: (faculties.find(f => f.id === editForm.faculty) || {}).full_name || "",
-              onChange: e => {
-                const match = faculties.find(f => f.full_name === e.target.value)
-                if (match) setEditForm(f => Object.assign({}, f, { faculty: match.id }))
-              }
-            }),
-            React.createElement("datalist", { id: "editFacultyOptions" },
-              faculties.map(f => {
-                const isOcc = occupiedFids.includes(f.id) && f.id !== editEntry.faculty
-                // In a perfect system, we'd fetch WHY they are occupied, but for now we label them.
-                return React.createElement("option", { key: f.id, value: f.full_name }, isOcc ? "⚠️ Occupied elsewhere" : "Available")
+            React.createElement("label", { style: { fontSize: "0.8rem", fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" } },
+              React.createElement("i", { className: "bi bi-book me-1" }), "Subject"),
+            React.createElement("select", {
+              className: "form-select form-select-sm",
+              value: selectedSubject ? selectedSubject.id : "",
+              onChange: function(e) { handleSubjectChange(e.target.value) },
+              required: true,
+              style: { borderRadius: 8, borderColor: "#d1d5db" }
+            },
+              React.createElement("option", { value: "" }, "— Select Subject —"),
+              subjects.map(function(s) {
+                return React.createElement("option", { key: s.id, value: s.id },
+                  s.code + " — " + s.name + (s.is_lab ? " (Lab)" : ""))
               })
+            )
+          ),
+
+          // Faculty — read only, auto-assigned
+          React.createElement("div", { className: "mb-3" },
+            React.createElement("label", { style: { fontSize: "0.8rem", fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" } },
+              React.createElement("i", { className: "bi bi-person-fill me-1" }), "Faculty",
+              React.createElement("span", { style: { fontSize: "0.7rem", color: "#6b7280", fontWeight: 400, marginLeft: 6 } }, "(auto-assigned, read-only)")
             ),
-            occupiedFids.length > 0 && React.createElement("div", { style: { fontSize: "0.7rem", color: "#ef4444", marginTop: 4, fontWeight: 500 } },
-              React.createElement("i", { className: "bi bi-exclamation-circle me-1" }),
-              "Some faculty members are already assigned to other departments in this slot."
+            React.createElement("div", { style: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: "0.88rem", color: "#1e293b", display: "flex", alignItems: "center", gap: 8, minHeight: 36 } },
+              facultyLoading
+                ? React.createElement("span", { className: "spinner-border spinner-border-sm", style: { color: "#1a237e" } })
+                : React.createElement(React.Fragment, null,
+                    React.createElement("i", { className: "bi bi-person-badge", style: { color: "#1a237e" } }),
+                    React.createElement("span", { style: { fontWeight: 600 } }, autoFaculty ? autoFaculty.name : "—"),
+                    autoFaculty && React.createElement("span", { style: { marginLeft: "auto", fontSize: "0.7rem", background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 6, fontWeight: 600 } }, "Auto")
+                  )
             )
           ),
 
+          // Classroom — auto-selected based on subject type
           React.createElement("div", { className: "mb-4" },
-            React.createElement("label", { className: "form-label fw-bold small text-secondary" }, "Classroom"),
-            React.createElement("input", {
-              list: "editRoomOptions",
-              className: "form-control form-control-sm",
-              placeholder: "Type or select classroom",
-              value: (classrooms.find(c => c.id === editForm.classroom) || {}).name || "",
-              onChange: e => {
-                const match = classrooms.find(c => c.name === e.target.value)
-                if (match) setEditForm(f => Object.assign({}, f, { classroom: match.id }))
-              }
-            }),
-            React.createElement("datalist", { id: "editRoomOptions" },
-              classrooms.map(c => React.createElement("option", { key: c.id, value: c.name }, c.is_lab ? "Lab" : "Theory"))
+            React.createElement("label", { style: { fontSize: "0.8rem", fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" } },
+              React.createElement("i", { className: "bi bi-door-open me-1" }), "Classroom",
+              React.createElement("span", { style: { fontSize: "0.7rem", color: "#6b7280", fontWeight: 400, marginLeft: 6 } }, "(auto-selected by type)")
+            ),
+            React.createElement("select", {
+              className: "form-select form-select-sm",
+              value: autoClassroom ? autoClassroom.id : (classrooms.find(c => c.id === editEntry.classroom) || {}).id || "",
+              onChange: function(e) {
+                const room = classrooms.find(c => c.id === Number(e.target.value))
+                setAutoClassroom(room || null)
+              },
+              style: { borderRadius: 8, borderColor: "#d1d5db" }
+            },
+              classrooms.map(function(c) {
+                return React.createElement("option", { key: c.id, value: c.id },
+                  c.name + (c.is_lab ? " (Lab)" : " (Theory)"))
+              })
             )
           ),
 
-          React.createElement("div", { style: { display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 8 } },
-            React.createElement("button", { type: "button", onClick: function() { setEditEntry(null) }, className: "btn btn-light px-4", style: { borderRadius: 12, fontWeight: 600, fontSize: "0.9rem" } }, "Cancel"),
-            React.createElement("button", { type: "submit", disabled: editSaving, className: "btn btn-primary px-4", style: { borderRadius: 12, fontWeight: 700, fontSize: "0.9rem", background: "linear-gradient(135deg, #1e293b, #334155)", border: "none" } },
-              editSaving ? React.createElement("span", { className: "spinner-border spinner-border-sm me-2" }) : null,
-              editSaving ? "Saving..." : "Apply Changes")
+          // Actions
+          React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } },
+            React.createElement("button", { type: "button", onClick: function() { setEditEntry(null) }, className: "btn btn-light px-4", style: { borderRadius: 10, fontWeight: 600 } }, "Cancel"),
+            React.createElement("button", { type: "submit", disabled: editSaving || !selectedSubject || !autoFaculty || facultyLoading, className: "btn px-4", style: { borderRadius: 10, fontWeight: 700, background: "linear-gradient(135deg, #1a237e, #3949ab)", color: "white", border: "none" } },
+              editSaving
+                ? React.createElement(React.Fragment, null, React.createElement("span", { className: "spinner-border spinner-border-sm me-2" }), "Saving...")
+                : React.createElement(React.Fragment, null, React.createElement("i", { className: "bi bi-check-lg me-1" }), "Apply Changes")
+            )
           )
         )
       )
