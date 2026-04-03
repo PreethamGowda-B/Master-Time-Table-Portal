@@ -912,8 +912,8 @@ def update_timetable_entry(request, entry_id):
     Validates global conflicts and faculty availability.
     """
     caller_role = _get_role(request.user)
-    if caller_role not in ('admin', 'hod'):
-        return Response({'error': 'Only Admin or HOD can edit timetable entries.'}, status=403)
+    if caller_role not in ('admin', 'hod', 'faculty'):
+        return Response({'error': 'Only Admin, HOD or Faculty can edit timetable entries.'}, status=403)
 
     try:
         entry = TimetableEntry.objects.select_related(
@@ -921,6 +921,12 @@ def update_timetable_entry(request, entry_id):
         ).get(id=entry_id)
     except TimetableEntry.DoesNotExist:
         return Response({'error': 'Entry not found.'}, status=404)
+
+    # Faculty can only edit their own slots
+    if caller_role == 'faculty':
+        fac = Faculty.objects.filter(user=request.user).first()
+        if not fac or entry.faculty_id != fac.id:
+            return Response({'error': 'You can only edit slots assigned to you.'}, status=403)
 
     subject_id   = request.data.get('subject')
     faculty_id   = request.data.get('faculty')
@@ -932,6 +938,16 @@ def update_timetable_entry(request, entry_id):
 
     if not new_subject or not new_faculty or not new_classroom:
         return Response({'error': 'Invalid subject, faculty, or classroom.'}, status=400)
+
+    # Faculty can only assign subjects they teach
+    if caller_role == 'faculty':
+        fac = Faculty.objects.filter(user=request.user).first()
+        assigned_subject_ids = set(
+            FacultyAssignment.objects.filter(faculty=fac)
+            .values_list('subjects__id', flat=True)
+        ) | set(fac.subjects.values_list('id', flat=True))
+        if new_subject.id not in assigned_subject_ids:
+            return Response({'error': 'You can only assign subjects you teach.'}, status=403)
 
     # Detect Lab pair
     entries_to_update = [entry]

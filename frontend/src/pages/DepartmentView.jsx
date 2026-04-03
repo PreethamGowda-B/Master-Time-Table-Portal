@@ -19,7 +19,9 @@ export default function DepartmentView() {
   const [searchParams] = useSearchParams()
   const navigate       = useNavigate()
   const user           = JSON.parse(localStorage.getItem("user") || "{}")
-  const canEdit        = user.role === "admin" || user.role === "hod"
+  const isAdmin        = user.role === "admin" || user.role === "hod"
+  const isFaculty      = user.role === "faculty"
+  const canEdit        = isAdmin || isFaculty  // both can enter edit mode
 
   const [departments, setDepartments] = useState([])
   const [timetable, setTimetable]     = useState(null)
@@ -219,7 +221,9 @@ export default function DepartmentView() {
     editMode && React.createElement("div", { className: "alert alert-warning py-2 mb-3 d-flex align-items-center gap-2", style: { fontSize: "0.85rem" } },
       React.createElement("i", { className: "bi bi-pencil-fill" }),
       React.createElement("strong", null, "Edit Mode ON"),
-      " \u2014 Click any filled cell to change its subject, faculty, or classroom."
+      isFaculty
+        ? " — You can only edit slots assigned to you. Other slots are locked."
+        : " — Click any filled cell to edit its subject and faculty."
     ),
 
     React.createElement("div", { className: "card mb-3" },
@@ -267,18 +271,31 @@ export default function DepartmentView() {
                     mondaySlots.map(function(ms) {
                       if (ms.is_break) return React.createElement("td", { key: ms.id, style: { background: "#fff3cd", textAlign: "center", verticalAlign: "middle", color: "#856404", fontWeight: 600, fontSize: "0.75rem" } }, "Break")
                       var entry = lookup[day] && lookup[day][ms.slot_number]
-                      var clickable = editMode && entry
+                      // Faculty can only edit their own slots; admin/hod can edit all
+                      var isOwnSlot = isAdmin || (isFaculty && entry && entry.faculty === user.faculty_id)
+                      var clickable = editMode && entry && isOwnSlot
+                      var lockedByOther = editMode && entry && isFaculty && !isOwnSlot
                       return React.createElement("td", {
                         key: ms.id,
-                        onClick: function() { if (clickable) openEdit(entry) },
-                        style: { verticalAlign: "middle", textAlign: "center", padding: "6px 8px", background: entry ? "#f0fdf4" : "#fafafa", cursor: clickable ? "pointer" : "default", outline: clickable ? "2px dashed #f59e0b" : "none" },
-                        title: clickable ? "Click to edit this slot" : ""
+                        onClick: function() {
+                          if (clickable) { openEdit(entry) }
+                          else if (lockedByOther) { toast.error("You can only edit your own assigned slots") }
+                        },
+                        style: {
+                          verticalAlign: "middle", textAlign: "center", padding: "6px 8px",
+                          background: lockedByOther ? "#f8f8f8" : entry ? "#f0fdf4" : "#fafafa",
+                          cursor: clickable ? "pointer" : lockedByOther ? "not-allowed" : "default",
+                          outline: clickable ? "2px dashed #f59e0b" : "none",
+                          opacity: lockedByOther ? 0.55 : 1,
+                        },
+                        title: clickable ? "Click to edit" : lockedByOther ? "Assigned to another faculty" : ""
                       },
                         entry ? React.createElement(React.Fragment, null,
                           React.createElement("div", { style: { fontWeight: 700, color: "#1a237e", fontSize: "0.82rem" } }, entry.subject_code),
                           React.createElement("div", { style: { fontSize: "0.72rem", color: "#374151", marginTop: 2 } }, entry.faculty_name),
                           React.createElement("div", { style: { fontSize: "0.68rem", color: "#6b7280", marginTop: 1 } }, React.createElement("i", { className: "bi bi-door-open" }), " " + entry.classroom_name),
-                          editMode && React.createElement("div", { style: { fontSize: "0.65rem", color: "#d97706", marginTop: 3 } }, React.createElement("i", { className: "bi bi-pencil" }), " edit")
+                          clickable && React.createElement("div", { style: { fontSize: "0.65rem", color: "#d97706", marginTop: 3 } }, React.createElement("i", { className: "bi bi-pencil" }), " edit"),
+                          lockedByOther && React.createElement("div", { style: { fontSize: "0.65rem", color: "#9ca3af", marginTop: 3 } }, React.createElement("i", { className: "bi bi-lock-fill" }), " locked")
                         ) : React.createElement("span", { style: { color: "#d1d5db" } }, "\u2014")
                       )
                     })
