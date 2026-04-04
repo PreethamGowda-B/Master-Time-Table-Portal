@@ -72,6 +72,7 @@ export default function Layout() {
                 {role === 'admin' && link('/portal/accounts', 'bi-people-fill', 'Accounts')}
                 {role === 'hod' && link('/portal/accounts', 'bi-person-badge-fill', 'Faculty Accounts')}
                 {role === 'admin' && link('/portal/settings', 'bi-gear-fill', 'Settings')}
+                {(role === 'admin' || role === 'hod') && link('/portal/combined-pdf', 'bi-file-earmark-pdf', 'Combined PDF')}
                 {role === 'faculty' && facultyId && link(`/portal/faculty-view/${facultyId}`, 'bi-person-lines-fill', 'My Timetable')}
                 {link('/portal/department/1', 'bi-building', 'Department View')}
                 {link('/portal/master-timetable', 'bi-grid-3x3-gap', 'Master Timetable')}

@@ -32,4 +32,5 @@ urlpatterns = [
     path('api/conflict-check/', api_views.conflict_check_api),
     path('api/timeslots/<int:ts_id>/', api_views.timeslot_detail_api),
     path('api/classrooms/<int:room_id>/', api_views.classroom_detail_api),
+    path('api/timetables/export-pdf/', api_views.export_combined_pdf),
 ]

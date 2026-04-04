@@ -13,6 +13,7 @@ import FacultyView from './pages/FacultyView'
 import Accounts from './pages/Accounts'
 import MasterTimetable from './pages/MasterTimetable'
 import Settings from './pages/Settings'
+import CombinedPDF from './pages/CombinedPDF'
 
 class ErrorBoundary extends React.Component {
   state = { error: null }
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="accounts" element={<Accounts />} />
         <Route path="master-timetable" element={<MasterTimetable />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="combined-pdf" element={<CombinedPDF />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

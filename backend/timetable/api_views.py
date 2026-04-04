@@ -1122,3 +1122,180 @@ def classroom_detail_api(request, room_id):
     if request.method == 'DELETE':
         room.delete()
         return Response({'message': 'Deleted'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def export_combined_pdf(request):
+    """Generate a combined PDF for multiple departments and semesters."""
+    caller_role = _get_role(request.user)
+    if caller_role not in ('admin', 'hod'):
+        return Response({'error': 'Only Admin or HOD can export PDFs.'}, status=403)
+
+    dept_ids  = request.data.get('departments', [])
+    semesters = request.data.get('semesters', [])
+
+    if not dept_ids or not semesters:
+        return Response({'error': 'Select at least one department and semester.'}, status=400)
+
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from io import BytesIO
+    from collections import defaultdict
+
+    DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=1*cm, leftMargin=1*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm,
+        title='Master Timetable'
+    )
+
+    styles = getSampleStyleSheet()
+    college_style = ParagraphStyle('college', fontSize=13, fontName='Helvetica-Bold',
+                                   alignment=TA_CENTER, spaceAfter=2)
+    title_style   = ParagraphStyle('title', fontSize=10, fontName='Helvetica-Bold',
+                                   alignment=TA_CENTER, spaceAfter=4)
+    cell_style    = ParagraphStyle('cell', fontSize=6.5, fontName='Helvetica',
+                                   alignment=TA_CENTER, leading=9)
+    header_style  = ParagraphStyle('hdr', fontSize=7, fontName='Helvetica-Bold',
+                                   alignment=TA_CENTER, textColor=colors.white)
+
+    story = []
+    first = True
+
+    timetables = (
+        Timetable.objects
+        .filter(department_id__in=dept_ids, semester__in=semesters, is_active=True)
+        .select_related('department')
+        .prefetch_related(
+            'entries__timeslot', 'entries__subject',
+            'entries__faculty__user', 'entries__classroom'
+        )
+        .order_by('department__name', 'semester')
+    )
+
+    if not timetables.exists():
+        return Response({'error': 'No active timetables found for the selected filters.'}, status=404)
+
+    # Get all non-break timeslots ordered by slot_number (use Monday as reference)
+    ref_slots = (
+        TimeSlot.objects
+        .filter(day='Monday', is_break=False)
+        .order_by('slot_number')
+    )
+    break_slots = TimeSlot.objects.filter(day='Monday', is_break=True).order_by('slot_number')
+
+    # Build ordered slot list (theory + break interleaved by slot_number)
+    all_monday = list(TimeSlot.objects.filter(day='Monday').order_by('slot_number'))
+
+    for tt in timetables:
+        if not first:
+            story.append(PageBreak())
+        first = False
+
+        # Header
+        story.append(Paragraph('East West College of Management', college_style))
+        story.append(Paragraph(
+            f'{tt.department.name} | Semester {tt.semester} | {tt.academic_year}',
+            title_style
+        ))
+        story.append(Spacer(1, 0.3*cm))
+
+        # Build lookup: day -> slot_number -> entry
+        lookup = defaultdict(dict)
+        for e in tt.entries.all():
+            lookup[e.timeslot.day][e.timeslot.slot_number] = e
+
+        # Column headers
+        header_row = [Paragraph('Day', header_style)]
+        col_widths  = [2.2*cm]
+
+        for ms in all_monday:
+            if ms.is_break:
+                header_row.append(Paragraph(
+                    f'Break\n{ms.start_time.strftime("%H:%M")}-{ms.end_time.strftime("%H:%M")}',
+                    ParagraphStyle('brk', fontSize=6, fontName='Helvetica-Bold',
+                                   alignment=TA_CENTER, textColor=colors.HexColor('#856404'))
+                ))
+                col_widths.append(1.6*cm)
+            else:
+                header_row.append(Paragraph(
+                    f'Slot {ms.slot_number}\n{ms.start_time.strftime("%H:%M")}-{ms.end_time.strftime("%H:%M")}',
+                    header_style
+                ))
+                col_widths.append(2.8*cm)
+
+        data = [header_row]
+
+        for day in DAYS:
+            row = [Paragraph(day, ParagraphStyle('day', fontSize=7, fontName='Helvetica-Bold',
+                                                  alignment=TA_CENTER, textColor=colors.HexColor('#1a237e')))]
+            for ms in all_monday:
+                if ms.is_break:
+                    row.append(Paragraph('Break', ParagraphStyle('b', fontSize=6, alignment=TA_CENTER,
+                                                                   textColor=colors.HexColor('#856404'))))
+                else:
+                    entry = lookup[day].get(ms.slot_number)
+                    if entry:
+                        fac_short = entry.faculty.user.get_full_name().split()[0] if entry.faculty.user.get_full_name() else ''
+                        lab_tag = ' LAB' if entry.is_lab_slot else ''
+                        text = f'<b>{entry.subject.code}{lab_tag}</b><br/>{fac_short}<br/><font size="5">{entry.classroom.name}</font>'
+                        row.append(Paragraph(text, cell_style))
+                    else:
+                        row.append(Paragraph('—', ParagraphStyle('empty', fontSize=7, alignment=TA_CENTER,
+                                                                   textColor=colors.lightgrey)))
+            data.append(row)
+
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+
+        # Style
+        ts = TableStyle([
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+            ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
+            # Day column
+            ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#e8eaf6')),
+            # Grid
+            ('GRID',       (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
+            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (1, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('TOPPADDING',  (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ])
+
+        # Highlight break columns
+        for ci, ms in enumerate(all_monday, start=1):
+            if ms.is_break:
+                ts.add('BACKGROUND', (ci, 0), (ci, -1), colors.HexColor('#fff3cd'))
+
+        table.setStyle(ts)
+        story.append(table)
+        story.append(Spacer(1, 0.5*cm))
+
+        # Signature line
+        sig_data = [['Prepared by:', 'HOD Signature:', 'Principal Signature:']]
+        sig_table = Table(sig_data, colWidths=[9*cm, 9*cm, 9*cm])
+        sig_table.setStyle(TableStyle([
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('LINEABOVE', (0, 0), (-1, 0), 0.5, colors.grey),
+        ]))
+        story.append(sig_table)
+
+    doc.build(story)
+    buffer.seek(0)
+
+    from django.http import HttpResponse
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="combined_timetable.pdf"'
+    response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+    return response
