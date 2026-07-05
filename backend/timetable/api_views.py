@@ -1127,167 +1127,243 @@ def classroom_detail_api(request, room_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def export_combined_pdf(request):
-    """Generate a combined PDF for multiple departments and semesters."""
+    """
+    Generate a master timetable PDF grouped by department.
+    Each department gets one page. Multiple semesters are stacked per day row,
+    matching the official INS FORMAT-H8 master timetable layout.
+    """
     caller_role = _get_role(request.user)
     if caller_role not in ('admin', 'hod'):
         return Response({'error': 'Only Admin or HOD can export PDFs.'}, status=403)
 
     dept_ids  = request.data.get('departments', [])
     semesters = request.data.get('semesters', [])
-
     if not dept_ids or not semesters:
         return Response({'error': 'Select at least one department and semester.'}, status=400)
 
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
-    from reportlab.lib.units import cm
+    from reportlab.lib.units import cm, mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.platypus.flowables import HRFlowable
     from io import BytesIO
     from collections import defaultdict
 
     DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    DAY_SHORT = {'Monday':'MON','Tuesday':'TUE','Wednesday':'WED',
+                 'Thursday':'THU','Friday':'FRI','Saturday':'SAT'}
+
+    # Styles
+    def ps(name, size, bold=False, color=colors.black, align=TA_CENTER, leading=None):
+        return ParagraphStyle(name, fontSize=size,
+            fontName='Helvetica-Bold' if bold else 'Helvetica',
+            textColor=color, alignment=align,
+            leading=leading or size+2, spaceAfter=0, spaceBefore=0)
+
+    hdr_white  = ps('hw', 7, bold=True, color=colors.white)
+    hdr_dark   = ps('hd', 7, bold=True, color=colors.HexColor('#1a237e'))
+    cell_p     = ps('cp', 6.5, leading=9)
+    sem_p      = ps('sp', 6.5, bold=True, color=colors.HexColor('#1a237e'))
+    day_p      = ps('dp', 8,  bold=True, color=colors.white)
+    break_p    = ps('bp', 6,  bold=True, color=colors.HexColor('#856404'))
+    empty_p    = ps('ep', 7,  color=colors.lightgrey)
+    college_p  = ps('col', 13, bold=True)
+    sub_p      = ps('sub', 9,  bold=True)
+    info_p     = ps('inf', 7.5)
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        rightMargin=1*cm, leftMargin=1*cm,
-        topMargin=1.5*cm, bottomMargin=1.5*cm,
-        title='Master Timetable'
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4),
+        rightMargin=0.8*cm, leftMargin=0.8*cm,
+        topMargin=1*cm, bottomMargin=1*cm)
 
-    styles = getSampleStyleSheet()
-    college_style = ParagraphStyle('college', fontSize=13, fontName='Helvetica-Bold',
-                                   alignment=TA_CENTER, spaceAfter=2)
-    title_style   = ParagraphStyle('title', fontSize=10, fontName='Helvetica-Bold',
-                                   alignment=TA_CENTER, spaceAfter=4)
-    cell_style    = ParagraphStyle('cell', fontSize=6.5, fontName='Helvetica',
-                                   alignment=TA_CENTER, leading=9)
-    header_style  = ParagraphStyle('hdr', fontSize=7, fontName='Helvetica-Bold',
-                                   alignment=TA_CENTER, textColor=colors.white)
+    # All Monday slots ordered (includes breaks)
+    all_monday = list(TimeSlot.objects.filter(day='Monday').order_by('slot_number'))
+    theory_slots = [s for s in all_monday if not s.is_break]
+    break_slot   = next((s for s in all_monday if s.is_break), None)
 
-    story = []
-    first = True
-
+    # Group timetables by department
+    dept_map = defaultdict(list)
     timetables = (
         Timetable.objects
         .filter(department_id__in=dept_ids, semester__in=semesters, is_active=True)
         .select_related('department')
-        .prefetch_related(
-            'entries__timeslot', 'entries__subject',
-            'entries__faculty__user', 'entries__classroom'
-        )
+        .prefetch_related('entries__timeslot','entries__subject',
+                          'entries__faculty__user','entries__classroom')
         .order_by('department__name', 'semester')
     )
-
     if not timetables.exists():
-        return Response({'error': 'No active timetables found for the selected filters.'}, status=404)
-
-    # Get all non-break timeslots ordered by slot_number (use Monday as reference)
-    ref_slots = (
-        TimeSlot.objects
-        .filter(day='Monday', is_break=False)
-        .order_by('slot_number')
-    )
-    break_slots = TimeSlot.objects.filter(day='Monday', is_break=True).order_by('slot_number')
-
-    # Build ordered slot list (theory + break interleaved by slot_number)
-    all_monday = list(TimeSlot.objects.filter(day='Monday').order_by('slot_number'))
+        return Response({'error': 'No active timetables found.'}, status=404)
 
     for tt in timetables:
-        if not first:
+        dept_map[tt.department].append(tt)
+
+    story = []
+    first_page = True
+
+    for dept, tt_list in sorted(dept_map.items(), key=lambda x: x[0].name):
+        if not first_page:
             story.append(PageBreak())
-        first = False
+        first_page = False
 
-        # Header
-        story.append(Paragraph('East West College of Management', college_style))
-        story.append(Paragraph(
-            f'{tt.department.name} | Semester {tt.semester} | {tt.academic_year}',
-            title_style
-        ))
-        story.append(Spacer(1, 0.3*cm))
+        # Sort timetables by semester
+        tt_list.sort(key=lambda x: x.semester)
+        sems_label = ', '.join(f'Sem {t.semester}' for t in tt_list)
+        acad_year  = tt_list[0].academic_year
 
-        # Build lookup: day -> slot_number -> entry
-        lookup = defaultdict(dict)
-        for e in tt.entries.all():
-            lookup[e.timeslot.day][e.timeslot.slot_number] = e
+        # Build lookup per timetable: sem -> day -> slot_number -> entry
+        sem_lookup = {}
+        for tt in tt_list:
+            lk = defaultdict(dict)
+            for e in tt.entries.all():
+                lk[e.timeslot.day][e.timeslot.slot_number] = e
+            sem_lookup[tt.semester] = lk
 
-        # Column headers
-        header_row = [Paragraph('Day', header_style)]
-        col_widths  = [2.2*cm]
+        # ── Header ──────────────────────────────────────────────────────────
+        story.append(Paragraph('East West College of Management', college_p))
+        story.append(Paragraph(f'{dept.name}  |  {sems_label}  |  {acad_year}', sub_p))
+        story.append(Spacer(1, 0.25*cm))
 
+        # ── Build table ──────────────────────────────────────────────────────
+        # Columns: DAY | SEM | slot1 | slot2 | ... | BREAK | slotN | ...
+        # Find break position
+        break_after = None  # slot_number after which break appears
+        if break_slot:
+            # break_slot.slot_number is its position; find last theory slot before it
+            for s in theory_slots:
+                if s.slot_number < break_slot.slot_number:
+                    break_after = s.slot_number
+
+        # Column widths
+        col_widths = [1.5*cm, 1.3*cm]  # DAY, SEM
         for ms in all_monday:
             if ms.is_break:
-                header_row.append(Paragraph(
-                    f'Break\n{ms.start_time.strftime("%H:%M")}-{ms.end_time.strftime("%H:%M")}',
-                    ParagraphStyle('brk', fontSize=6, fontName='Helvetica-Bold',
-                                   alignment=TA_CENTER, textColor=colors.HexColor('#856404'))
-                ))
-                col_widths.append(1.6*cm)
+                col_widths.append(1.4*cm)
             else:
-                header_row.append(Paragraph(
-                    f'Slot {ms.slot_number}\n{ms.start_time.strftime("%H:%M")}-{ms.end_time.strftime("%H:%M")}',
-                    header_style
-                ))
-                col_widths.append(2.8*cm)
+                col_widths.append(2.6*cm)
 
-        data = [header_row]
+        # Header row
+        header = [
+            Paragraph('DAY', hdr_white),
+            Paragraph('SEM', hdr_white),
+        ]
+        for ms in all_monday:
+            if ms.is_break:
+                header.append(Paragraph(
+                    f'Break\n{ms.start_time.strftime("%H:%M")}-{ms.end_time.strftime("%H:%M")}',
+                    ps('bh', 6, bold=True, color=colors.HexColor('#856404'))
+                ))
+            else:
+                header.append(Paragraph(
+                    f'Slot {ms.slot_number}\n{ms.start_time.strftime("%H:%M")}-{ms.end_time.strftime("%H:%M")}',
+                    hdr_white
+                ))
+
+        data = [header]
+        span_cmds = []  # for SPAN commands
+        row_idx = 1     # current data row index (0 = header)
 
         for day in DAYS:
-            row = [Paragraph(day, ParagraphStyle('day', fontSize=7, fontName='Helvetica-Bold',
-                                                  alignment=TA_CENTER, textColor=colors.HexColor('#1a237e')))]
-            for ms in all_monday:
-                if ms.is_break:
-                    row.append(Paragraph('Break', ParagraphStyle('b', fontSize=6, alignment=TA_CENTER,
-                                                                   textColor=colors.HexColor('#856404'))))
+            n_sems = len(tt_list)
+            day_start_row = row_idx
+
+            for i, tt in enumerate(tt_list):
+                row = []
+                # DAY cell — only on first sem row, spans all sem rows
+                if i == 0:
+                    row.append(Paragraph(DAY_SHORT[day], day_p))
                 else:
-                    entry = lookup[day].get(ms.slot_number)
-                    if entry:
-                        fac_short = entry.faculty.user.get_full_name().split()[0] if entry.faculty.user.get_full_name() else ''
-                        lab_tag = ' LAB' if entry.is_lab_slot else ''
-                        text = f'<b>{entry.subject.code}{lab_tag}</b><br/>{fac_short}<br/><font size="5">{entry.classroom.name}</font>'
-                        row.append(Paragraph(text, cell_style))
+                    row.append('')  # will be spanned
+
+                # SEM label
+                row.append(Paragraph(f'Sem {tt.semester}', sem_p))
+
+                # Slot cells
+                lk = sem_lookup[tt.semester]
+                for ms in all_monday:
+                    if ms.is_break:
+                        if i == 0:
+                            row.append(Paragraph('LUNCH\nBREAK', break_p))
+                        else:
+                            row.append('')
                     else:
-                        row.append(Paragraph('—', ParagraphStyle('empty', fontSize=7, alignment=TA_CENTER,
-                                                                   textColor=colors.lightgrey)))
-            data.append(row)
+                        entry = lk[day].get(ms.slot_number)
+                        if entry:
+                            fac = entry.faculty.user.get_full_name() or entry.faculty.user.username
+                            fac_short = fac.split()[0]
+                            lab = ' LAB' if entry.is_lab_slot else ''
+                            text = (f'<b>{entry.subject.code}{lab}</b><br/>'
+                                    f'{fac_short}<br/>'
+                                    f'<font size="5">{entry.classroom.name}</font>')
+                            row.append(Paragraph(text, cell_p))
+                        else:
+                            row.append(Paragraph('—', empty_p))
+
+                data.append(row)
+                row_idx += 1
+
+            # Span DAY cell across all sem rows for this day
+            if n_sems > 1:
+                span_cmds.append(('SPAN', (0, day_start_row), (0, row_idx - 1)))
+                # Also span break column
+                for ci, ms in enumerate(all_monday, start=2):
+                    if ms.is_break:
+                        span_cmds.append(('SPAN', (ci, day_start_row), (ci, row_idx - 1)))
 
         table = Table(data, colWidths=col_widths, repeatRows=1)
 
-        # Style
-        ts = TableStyle([
-            # Header row
+        # Base style
+        ts_cmds = [
+            # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
             ('TEXTCOLOR',  (0, 0), (-1, 0), colors.white),
-            # Day column
-            ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#e8eaf6')),
+            # DAY column
+            ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#1a237e')),
+            ('TEXTCOLOR',  (0, 1), (0, -1), colors.white),
+            # SEM column
+            ('BACKGROUND', (1, 1), (1, -1), colors.HexColor('#e8eaf6')),
             # Grid
-            ('GRID',       (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
+            ('GRID',       (0, 0), (-1, -1), 0.5, colors.HexColor('#94a3b8')),
             ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
             ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
-            ('ROWBACKGROUNDS', (1, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
-            ('TOPPADDING',  (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ])
+            ('TOPPADDING',    (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
+        ]
 
-        # Highlight break columns
-        for ci, ms in enumerate(all_monday, start=1):
+        # Break column highlight
+        for ci, ms in enumerate(all_monday, start=2):
             if ms.is_break:
-                ts.add('BACKGROUND', (ci, 0), (ci, -1), colors.HexColor('#fff3cd'))
+                ts_cmds.append(('BACKGROUND', (ci, 0), (ci, -1), colors.HexColor('#fff3cd')))
+                ts_cmds.append(('TEXTCOLOR',  (ci, 0), (ci, -1), colors.HexColor('#856404')))
 
-        table.setStyle(ts)
+        # Alternating row bg per day block
+        row_idx2 = 1
+        for di, day in enumerate(DAYS):
+            n = len(tt_list)
+            bg = colors.white if di % 2 == 0 else colors.HexColor('#f8fafc')
+            ts_cmds.append(('BACKGROUND', (2, row_idx2), (-1, row_idx2 + n - 1), bg))
+            row_idx2 += n
+
+        ts_cmds += span_cmds
+        table.setStyle(TableStyle(ts_cmds))
         story.append(table)
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.6*cm))
 
-        # Signature line
-        sig_data = [['Prepared by:', 'HOD Signature:', 'Principal Signature:']]
-        sig_table = Table(sig_data, colWidths=[9*cm, 9*cm, 9*cm])
+        # ── Signature section ────────────────────────────────────────────────
+        sig_data = [[
+            Paragraph('Prepared by: ___________________', info_p),
+            Paragraph('HOD Signature: ___________________', info_p),
+            Paragraph('Principal Signature: ___________________', info_p),
+        ]]
+        sig_w = (doc.width) / 3
+        sig_table = Table(sig_data, colWidths=[sig_w, sig_w, sig_w])
         sig_table.setStyle(TableStyle([
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 12),
-            ('LINEABOVE', (0, 0), (-1, 0), 0.5, colors.grey),
+            ('TOPPADDING',  (0,0),(-1,-1), 8),
+            ('LINEABOVE',   (0,0),(-1, 0), 0.5, colors.grey),
+            ('ALIGN',       (0,0),(-1,-1), 'LEFT'),
         ]))
         story.append(sig_table)
 
@@ -1296,6 +1372,6 @@ def export_combined_pdf(request):
 
     from django.http import HttpResponse
     response = HttpResponse(buffer, content_type='application/pdf')
-    response['Content-Disposition'] = 'attachment; filename="combined_timetable.pdf"'
+    response['Content-Disposition'] = 'attachment; filename="master_timetable.pdf"'
     response['Access-Control-Expose-Headers'] = 'Content-Disposition'
     return response
